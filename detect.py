@@ -73,31 +73,34 @@ if __name__ == '__main__':
             if config.half:
                 pred = pred.float()
 
-            # Apply NMS
-            pred = non_max_suppression(pred, config.conf_thres, config.iou_thres,
-                                       fast=True, classes=class_names, agnostic=config.agnostic_nms)
+            # Apply NMS。pred: list(tensor)
+            pred = non_max_suppression(pred, conf_thres=config.conf_thres, iou_thres=config.iou_thres,
+                                       fast=True, classes=None, agnostic=config.agnostic_nms)
 
             # 根据每张图片大小设置字体和画框的粗细
             font = ImageFont.truetype(font='font/FiraMono-Medium.otf',
-                                      size=np.floor(3e-2 * im0s.size[1] + 0.5).astype('int32'))
-            thickness = (im0s.size[0] + im0s.size[1]) // 300
+                                      size=np.floor(3e-2 * im0s.shape[0] + 0.5).astype('int32'))
+            thickness = (im0s.shape[0] + im0s.shape[1]) // 300
 
             # Process detections
             for i, det in enumerate(pred):  # detections per image
+                # det = det.detach().cpu().numpy()    # 将pred中每个元素都转成np.ndarray，方便后处理
                 if webcam:  # batch_size >= 1
-                    p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+                    p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()    # im0:np.ndarray
                 else:
                     p, s, im0 = path, '', im0s
 
                 save_path = str(Path(config.output) / Path(p).name)
                 s += '%gx%g ' % img.shape[2:]  # print string
                 gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+                im0_pil = Image.fromarray(im0)    # 做成PIL.Image，供ImageDraw用
                 if det is not None and len(det):
                     # 放缩图像大小由img到原始shape
                     det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                     # Print results
                     for c in det[:, -1].unique():
+                        # print("c:", type(c), c)
                         n = (det[:, -1] == c).sum()  # detections per class
                         s += '%g %ss, ' % (n, class_names[int(c)])  # add to string
 
@@ -111,15 +114,15 @@ if __name__ == '__main__':
                         if config.save_img or config.view_img:
                             label = '%s %.2f' % (class_names[int(cls)], conf)
 
-                            draw = ImageDraw.Draw(im0)
+                            draw = ImageDraw.Draw(im0_pil)
                             label_size = draw.textsize(label, font)
 
-                            left, top, right, bottom = xyxy    # 这里是左上右下
-                            top = max(0, np.floor(top + 0.5).astype('int32'))
-                            left = max(0, np.floor(left + 0.5).astype('int32'))
-                            bottom = min(im0.size[1], np.floor(bottom + 0.5).astype('int32'))
-                            right = min(im0.size[0], np.floor(right + 0.5).astype('int32'))
-                            # print(label, (left, top), (right, bottom))
+                            left, top, right, bottom = xyxy    # 这里是左上右下。在gpu设备上
+                            top = max(0, np.floor(top.item() + 0.5).astype('int32'))    # 使用.item()将数据转移到cpu上才能继续计算，.cpu()无效
+                            left = max(0, np.floor(left.item() + 0.5).astype('int32'))
+                            bottom = min(im0.shape[1], np.floor(bottom.item() + 0.5).astype('int32'))
+                            right = min(im0.shape[0], np.floor(right.item() + 0.5).astype('int32'))
+                            # print("\t", label, (left, top), (right, bottom))
 
                             if top - label_size[1] >= 0:
                                 text_origin = np.array([left, top - label_size[1]])
@@ -130,17 +133,20 @@ if __name__ == '__main__':
                             for i in range(thickness):
                                 draw.rectangle(
                                     [left + i, top + i, right - i, bottom - i],
-                                    outline=colors[c])
+                                    outline=colors[int(c.item())])
                             draw.rectangle(
                                 [tuple(text_origin), tuple(text_origin + label_size)],
-                                fill=colors[c])
+                                fill=colors[int(c.item())])
                             draw.text(text_origin, label, fill=(0, 0, 0), font=font)
                             del draw
                 print('%sDone. (%.3fs)' % (s, t2 - t1))
 
+                # 标注完之后再转回np.ndarray
+                im0 = np.array(im0_pil)
+
                 # Stream results
                 if config.view_img:
-                    cv2.imshow(p, im0)
+                    cv2.imshow(p, np.ndarray(im0))
                     if cv2.waitKey(1) == ord('q'):  # q to quit
                         raise StopIteration
 

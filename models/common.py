@@ -23,14 +23,14 @@ class Conv(nn.Module):
         super(Conv, self).__init__()
         self.conv = nn.Conv2d(channel_in, channel_out, kernel, stride, kernel // 2, groups=groups, bias=False)
         self.bn = nn.BatchNorm2d(channel_out)
-        self.acti = nn.LeakyReLU(0.1, inplace=True) if activation else nn.Identity()
+        self.act = nn.LeakyReLU(0.1, inplace=True) if activation else nn.Identity()
 
     def forward(self, x):
-        return self.acti(self.bn(self.conv(x)))
+        return self.act(self.bn(self.conv(x)))
 
     # 没有bn层的前向传播
     def fuseforward(self, x):
-        return self.acti(self.conv(x))
+        return self.act(self.conv(x))
 
 '''
     残差模块：Bottleneck结构
@@ -46,13 +46,13 @@ class Bottleneck(nn.Module):
     def __init__(self, channel_in, channel_out, shortcut=True, group=1, expansion=0.5):
         super(Bottleneck, self).__init__()
         c_ = int(channel_out * expansion)    # 降维后通道个数
-        self.conv1 = Conv(channel_in, c_, 1, 1)
-        self.conv2 = Conv(c_, channel_out, 3, 1, groups=group)
+        self.cv1 = Conv(channel_in, c_, 1, 1)
+        self.cv2 = Conv(c_, channel_out, 3, 1, groups=group)
         self.add = shortcut and channel_in == channel_out    # 先降维后升维后的维度和降维前相等，才能做残差连接
 
     # 前向传播：残差连接
     def forward(self, x):
-        return x + self.conv2(self.conv1(x)) if self.add else self.conv2(self.conv1(x))
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 '''
     SPP结构：参照yolov3-spp
@@ -62,13 +62,13 @@ class SPP(nn.Module):
     def __init__(self, channel_in, channel_out, kernel=(5, 9, 13)):
         super(SPP, self).__init__()
         c_ = channel_in // 2    #
-        self.conv1 = Conv(channel_in, c_, 1, 1)    # 先降维
-        self.module_list = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in kernel])    # 同时做len(kernel)种maxpooling
-        self.conv2 = Conv(c_ * (len(kernel) + 1), channel_out, 1, 1)    # 最后升维
+        self.cv1 = Conv(channel_in, c_, 1, 1)    # 先降维
+        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in kernel])    # 同时做len(kernel)种maxpooling
+        self.cv2 = Conv(c_ * (len(kernel) + 1), channel_out, 1, 1)    # 最后升维
 
     def forward(self, x):
-        x = self.conv1(x)
-        return self.conv2(torch.cat([x] + [m(x) for m in self.module_list], 1))
+        x = self.cv1(x)
+        return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
 
 # 深度可分离卷积
 def DWConv(channel_in, channel_out, kernel=1, stride=1, activation=True):
@@ -122,11 +122,11 @@ class Focus(nn.Module):
 class ConvPlus(nn.Module):
     def __init__(self, channel_in, channel_out, kernel=3, stride=1, group=1, bias=True):
         super(ConvPlus, self).__init__()
-        self.conv1 = nn.Conv2d(channel_in, channel_out, (kernel, 1), stride, (kernel // 2, 0), groups=group, bias=bias)
-        self.conv2 = nn.Conv2d(channel_in, channel_out, (1, kernel), stride, (0, kernel // 2), groups=group, bias=bias)
+        self.cv1 = nn.Conv2d(channel_in, channel_out, (kernel, 1), stride, (kernel // 2, 0), groups=group, bias=bias)
+        self.cv2 = nn.Conv2d(channel_in, channel_out, (1, kernel), stride, (0, kernel // 2), groups=group, bias=bias)
 
     def forward(self, x):
-        return self.conv1(x) + self.conv2(x)
+        return self.cv1(x) + self.cv2(x)
 
 '''
     CSP版Bottleneck
@@ -143,18 +143,18 @@ class BottleneckCSP(nn.Module):
     def __init__(self, channel_in, channel_out, num=1, shortcut=True, group=1, expansion=0.5):
         super(BottleneckCSP, self).__init__()
         c_ = int(channel_out * expansion)    # Bottleneck结构中降维降到多少
-        self.conv1 = Conv(channel_in, c_, 1, 1)    # CBL
-        self.conv2 = nn.Conv2d(channel_in, c_, 1, 1, bias=False)
-        self.conv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
-        self.conv4 = Conv(channel_out, channel_out, 1, 1)
+        self.cv1 = Conv(channel_in, c_, 1, 1)    # CBL
+        self.cv2 = nn.Conv2d(channel_in, c_, 1, 1, bias=False)
+        self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
+        self.cv4 = Conv(channel_out, channel_out, 1, 1)
         self.bn = nn.BatchNorm2d(2 * c_)    # 准备去cat(conv2, conv3)
-        self.acti = nn.LeakyReLU(0.1, inplace=True)
-        self.module_list = nn.Sequential(*[Bottleneck(c_, c_, shortcut, group, expansion=0.1) for _ in range(num)])
+        self.act = nn.LeakyReLU(0.1, inplace=True)
+        self.m = nn.Sequential(*[Bottleneck(c_, c_, shortcut, group, expansion=0.1) for _ in range(num)])
 
     def forward(self, x):
-        y1 = self.conv3(self.module_list(self.conv1(x)))
-        y2 = self.conv2(x)
-        return self.conv4(self.acti(self.bn(torch.cat((y1, y2), dim=1))))
+        y1 = self.cv3(self.m(self.cv1(x)))
+        y2 = self.cv2(x)
+        return self.cv4(self.act(self.bn(torch.cat((y1, y2), dim=1))))
 
 '''
     按指定dim拼接tensor
@@ -162,9 +162,9 @@ class BottleneckCSP(nn.Module):
 class Concat(nn.Module):
     def __init__(self, dimension=1):
         super(Concat, self).__init__()
-        self.dim = dimension
+        self.d = dimension
 
     def forward(self, x):
-        return torch.cat(x, self.dim)
+        return torch.cat(x, self.d)
 
 

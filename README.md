@@ -45,5 +45,27 @@ torch.save(my_model.state_dict(), PATH)
 
 ​	而yolov5官方直接保存模型的原因：yolov5中前向传播涉及到自适应锚框的计算（根据模型中保存的training_result自适应锚框计算，而不是提前定义好锚框），如果只保存权重参数，模型前向传播计算不了。
 
+### 2、torch.nn.modules.module.ModuleAttributeError: 'Focus' object has no attribute 'ffrom'
+
+​	出现该错误，主要原因是自己解析yolov5s.yaml等配置文件，构建网络时使用的模块名称与预训练模型中保存的模型结构不一致。
+
+​	类似错误还有：
+
+``` python
+torch.nn.modules.module.ModuleAttributeError: 'Conv' object has no attribute 'acti'
+torch.nn.modules.module.ModuleAttributeError: 'Bottleneck' object has no attribute 'conv1'
+torch.nn.modules.module.ModuleAttributeError: 'Bottleneck' object has no attribute 'conv2'
+torch.nn.modules.module.ModuleAttributeError: 'BottleneckCSP' object has no attribute 'conv3'
+torch.nn.modules.module.ModuleAttributeError: 'BottleneckCSP' object has no attribute 'conv4'
+torch.nn.modules.module.ModuleAttributeError: 'BottleneckCSP' object has no attribute 'module_list'
+torch.nn.modules.module.ModuleAttributeError: 'Concat' object has no attribute 'dim'
+torch.nn.modules.module.ModuleAttributeError: 'Detect' object has no attribute 'num_layers'
+torch.nn.modules.module.ModuleAttributeError: 'Detect' object has no attribute 'num_anchors'
+```
+
+​	等等。
+
+​	解决办法：推理时如果用预训练模型，则在构建网络结构时候使用与预训练模型相同的名字。
+
 
 
