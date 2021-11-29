@@ -1,6 +1,8 @@
 import os
+import cv2
 import math
 import time
+import random
 import torch
 import torchvision
 import numpy as np
@@ -158,3 +160,34 @@ def clip_coords(boxes, img_shape):
     boxes[:, 1].clamp_(0, img_shape[0])  # y1
     boxes[:, 2].clamp_(0, img_shape[1])  # x2
     boxes[:, 3].clamp_(0, img_shape[0])  # y2
+
+'''
+    在原图上标注推理结果
+'''
+def plot_one_box(x, img, color=None, label=None, line_thickness=None):
+    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1    # 画线/字体的粗细
+    color = color or [random.randint(0, 255) for _ in range(3)]    # 如果每传入颜色的话随机指定一个颜色
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))    # 左上右下
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)    #
+    if label:
+        thickness = max(tl - 1, 1)    # 字体粗细
+        t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=thickness)[0]
+        c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3    # 字体涂色区域
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)    # filled
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [0, 0, 0], thickness=thickness, lineType=cv2.LINE_AA)
+
+'''
+    格式化时间戳
+    :param timestamp time.time()
+    :param format 指定格式
+    :param ms 是否需要精确到毫秒，默认不需要
+'''
+def formatTimestamp(timestamp, format="%Y-%m-%d_%H:%M:%S", ms=False):
+    time_tuple = time.localtime(timestamp)
+    data_head = time.strftime(format, time_tuple)
+    if ms is False:
+        return data_head
+    else:
+        data_secs = (timestamp - int(timestamp)) * 1000
+        data_ms = "%s.%03d" % (data_head, data_secs)
+        return data_ms

@@ -12,11 +12,11 @@ vid_formats = ['.mov', '.avi', '.mp4']
 
 
 '''
-    视频流
+    视频流：目前只支持单一摄像头，一次只处理一张图片
 '''
 class LoadStream:
     def __init__(self, sources='streams.txt', img_size=416):
-        self.mode = 'images'
+        self.mode = 'stream'
         self.img_size = img_size
 
         # 解析视频流数据源
@@ -75,11 +75,11 @@ class LoadStream:
             raise StopIteration
 
         # letterbox方式做resize
-        img = [letterbox(x, new_shape=self.img_size, auto=self.rect)[0] for x in img0]
+        img = [letterbox(x, new_shape=self.img_size, auto=self.rect)[0] for x in img0][0]    # 一帧一帧做
 
-        img = img[:, :, ::-1].transpose(0, 3, 1, 2)    # BHWC-->BCHW, BGR-->RGB
+        img = img[:, :, ::-1].transpose(2, 0, 1)    # BHWC-->BCHW, BGR-->RGB
         img = np.ascontiguousarray(img)    # 将内存不连续存储的数组转换为内存连续存储的数组，使得运行速度更快
-        return self.sources, img, img0, None
+        return self.sources, img, img0[0], None
 
     def __len__(self):
         return 0

@@ -129,3 +129,5 @@ dmypy.json
 .vscode/
 .idea/
 *.ipynb
+
+inference/output/
