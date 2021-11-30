@@ -92,11 +92,11 @@ class Model(nn.Module):
     def _init_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
-        for f, s in zip(m.ffrom, m.stride):  #  from
+        for f, s in zip(m.f, m.stride):  #  from
             mi = self.model[f % m.i]
-            b = mi.bias.view(m.num_anchors, -1)  # conv.bias(255) to (3,85)
+            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
             b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
-            b[:, 5:] += math.log(0.6 / (m.num_classes - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
+            b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
     def forward(self, x, augment=False):
@@ -177,7 +177,7 @@ def parse_model(model_dict, ch):
 
         module_.i = i  # 模块序号
         module_.f = ffrom  # 当前模块前面接哪个模块
-        module_.type = str(module).replace('__main__.', '')  # 模块类别（名称）
+        module_.type = str(module)[8:-2].replace('__main__.', '')  # 模块类别（名称）
         module_.np = sum([x.numel() for x in module_.parameters()])  # num_params，统计模块的参数量
 
         print('%3s%15s%3s%10.0f  %-40s%-30s' % (i, ffrom, num, module_.np, module_.type, args))    # 打印当前层结构信息
@@ -195,9 +195,9 @@ if __name__ == '__main__':
     # print(len(anchors[0]))
     # print(anchors[0])
     #
-    # model = Model()
-    # print(model)
+    model = Model()
+    print(model)
 
-    # 推理时直接这样创建并加载模型
-    model = torch.load("../checkpoint/yolov5s.pt")['model']
-    print("model:", model)
+    # # 推理时直接这样创建并加载模型
+    # model = torch.load("../checkpoint/yolov5s.pt")['model']
+    # print("model:", model)
