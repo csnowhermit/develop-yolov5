@@ -26,6 +26,7 @@ train_dataset = "F:/dataset/balloon/images/train/"
 val_dataset = "F:/dataset/balloon/images/val/"
 nc = 1    # 物体总数
 class_names = ['balloon']    # 物体名称
+save_freq = 50
 
 # 超参数
 hyp = {'lr0': 0.01,  # initial learning rate (SGD=1E-2, Adam=1E-3)

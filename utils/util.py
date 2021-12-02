@@ -5,6 +5,7 @@ import time
 import random
 import torch
 import torchvision
+import torch.nn as nn
 import numpy as np
 
 
@@ -209,3 +210,82 @@ def labels_to_class_weights(labels, nc=80):
     weights = 1 / weights    # number of targets per class
     weights /= weights.sum()    # normalize
     return torch.from_numpy(weights)
+
+'''
+    计算损失
+    :param pred 模型推理的结果
+    :param targets 标签
+    :param model 模型
+'''
+def compute_loss(pred, targets, model):
+    floatTensor = torch.cuda.FloatTensor if pred[0].is_cuda else torch.Tensor    # 确定tensor的数据类型
+    label_cls, label_box, label_obj = floatTensor([0]), floatTensor([0]), floatTensor([0])
+    target_cls, target_box, target_obj, anchors = build_targets(pred, targets, model)    # 构建标签集
+    loss_reduction = 'mean'
+
+    # 指定loss函数，对pred做sigmoid后再进行BCELoss
+    BCE_cls = nn.BCEWithLogitsLoss(pos_weight=floatTensor(model.hyp['cls_pw']), reduction=loss_reduction)    # 相当于带sigmoid的BCELoss
+    BCE_obj = nn.BCEWithLogitsLoss(pos_weight=floatTensor(model.hyp['obj_pw']), reduction=loss_reduction)
+
+    # 做标签平滑
+    cp, cn = smooth_BCE(eps=0.0)
+
+
+
+'''
+    构建标签集
+    :param pred 预测结果
+    :param targets 模型的标签
+    :param model moxing 
+    :return target_cls 标签的类别列表
+    :return target_box 标签的框列表
+    :return indices [[image, anchor, grid indices], ...]列表
+    :return anchors 标签的anchors框列表
+'''
+def build_targets(pred, targets, model):
+    # Detect()模块
+    det = model.module.model[-1] if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel) else model.model[-1]
+
+    na, nt = det.na, targets.shape[0]
+    target_cls, target_box, indices, anchors = [], [], [], []
+    gain = torch.ones(6, device=targets.device)
+    off = torch.tensor([[1, 0], [0, 1], [-1, 0], [0, -1]], device=targets.device).float()    # 重叠的偏移量
+    at = torch.arange(na).view(na, 1).repeat(1, nt)  # na复制出nt份，at.shape: [na, nt]
+
+    for i in range(det.nl):    # Detect()模块的层数
+        anchors = det.anchors[i]
+        gain[2:] = torch.tensor(pred[i].shape)[[3, 2, 3, 2]]    # 获取xyxy
+
+        # 匹配目标框和anchors框
+        a, t, offsets = [], targets * gain, 0    # offsets为目标框和anchors框的偏移量
+        if nt:    # 有目标框才进行如下操作
+            r = t[None, :, 4:6] / anchors[:, None]    # 目标框和anchors框的宽高比
+            j = torch.max(r, 1./r).max(2)[0] < model.hpy['anchor_t']    # 比较r矩阵，每行的最大值与模型定义中的大小
+            a, t = at[j], t.repeat(na, 1, 1)[j]
+
+            # 计算重叠部分
+            gxy = t[:, 2:4]    # [len(a), 2]
+            z = torch.zeros_like(gxy)
+            g = 0.5  # offset
+            j, k = ((gxy % 1. < g) & (gxy > 1.)).cpu().numpy().T
+            l, m = ((gxy % 1. > (1 - g)) & (gxy < (gain[[2, 3]] - 1.))).cpu().numpy().T
+            a, t = torch.cat((a, a[j], a[k], a[l], a[m]), 0), torch.cat((t, t[j], t[k], t[l], t[m]), 0)
+            offsets = torch.cat((z, z[j] + off[0], z[k] + off[1], z[l] + off[2], z[m] + off[3]), 0) * g
+
+        b, c = t[:, :2].cpu().numpy().T  # image, class
+        gxy = t[:, 2:4]  # grid xy
+        gwh = t[:, 4:6]  # grid wh
+        gij = (gxy - offsets).long()
+        gi, gj = gij.cpu().numpy().T  # grid xy indices
+
+        indices.append((b, a, gj, gi))    # image, anchor, grid indices
+        target_box.append(torch.cat((gxy.float() - gij.float(), gwh.float()), 1))
+        anchors.append(anchors[a])
+        target_cls.append(c)
+    return target_cls, target_box, indices, anchors
+
+'''
+    做标签平滑
+'''
+def smooth_BCE(eps=0.0):
+    return 1.0 - 0.5 * eps, 0.5 * eps

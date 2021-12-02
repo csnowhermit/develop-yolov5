@@ -143,7 +143,7 @@ if __name__ == '__main__':
                 ni = i + len(train_dataloader) * epoch  # number integrated batches (since train start)
                 imgs = imgs.to(config.device).float() / 255.0    # 图像的归一化
 
-                # Burn-in
+                # Burn-in，这一段没看懂
                 if ni <= n_burn:
                     xi = [0, n_burn]  # x interp
                     # model.gr = np.interp(ni, xi, [0.0, 1.0])  # giou loss ratio (obj_loss = 1.0 or giou)
@@ -169,8 +169,46 @@ if __name__ == '__main__':
                     '%g/%g' % (epoch, config.epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
+                # Plot
+                if ni < 3:
+                    res = plot_images(images=imgs, targets=targets, paths=paths, fname='train_batch%g.jpg' % i)
+            optimizer.step()
+            ema.update_attr(model)
+
+            # 每隔多少个epochs保存一次
+            final_epoch = epoch + 1 == config.epochs
+            if final_epoch:    # 最后一个epoch
+                results, maps, times = test.test(opt.data,
+                                                 batch_size=batch_size,
+                                                 imgsz=imgsz_test,
+                                                 save_json=final_epoch and opt.data.endswith(os.sep + 'coco.yaml'),
+                                                 model=ema.ema,
+                                                 single_cls=opt.single_cls,
+                                                 dataloader=testloader,
+                                                 fast=ni < n_burn)
+            # Write
+            with open(results_file, 'a') as f:
+                f.write(s + '%10.4g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
+
+            # Update best mAP
+            fi = fitness(np.array(results).reshape(1, -1))  # fitness_i = weighted combination of [P, R, mAP, F1]
+            if fi > best_fitness:
+                best_fitness = fi
 
 
+            # 保存模型
+            with open(results_file, 'r') as f:  # create checkpoint
+                ckpt = {'epoch': epoch,
+                        'best_fitness': best_fitness,
+                        'training_results': f.read(),
+                        'model': ema.ema.module if hasattr(model, 'module') else ema.ema,
+                        'optimizer': None if final_epoch else optimizer.state_dict()}
+
+            # Save last, best and delete
+            torch.save(ckpt, last)
+            if (best_fitness == fi) and not final_epoch:    # 如果是最优的，并且不是最后一个epoch
+                torch.save(ckpt, best)
+            del ckpt
 
 
 
