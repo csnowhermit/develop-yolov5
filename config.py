@@ -1,8 +1,8 @@
 import torch
 
 model_cfg = "./yolov5s.yaml"    # 模型结构配置文件
-use_gpu = True
-device = torch.device('cuda:0')
+use_gpu = False
+device = torch.device('cpu')
 weight = "./checkpoint/yolov5s.pt"
 
 # detect 推理过程
@@ -22,7 +22,10 @@ agnostic_nms = False
 epochs = 300
 batch_size = 4
 cfg = "./models/balloon/yolov5s.yaml"
-data = "./data/balloon.yaml"
+train_dataset = "F:/dataset/balloon/images/train/"
+val_dataset = "F:/dataset/balloon/images/val/"
+nc = 1    # 物体总数
+class_names = ['balloon']    # 物体名称
 
 # 超参数
 hyp = {'lr0': 0.01,  # initial learning rate (SGD=1E-2, Adam=1E-3)

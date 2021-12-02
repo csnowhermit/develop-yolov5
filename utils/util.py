@@ -191,3 +191,21 @@ def formatTimestamp(timestamp, format="%Y-%m-%d_%H:%M:%S", ms=False):
         data_secs = (timestamp - int(timestamp)) * 1000
         data_ms = "%s.%03d" % (data_head, data_secs)
         return data_ms
+
+'''
+    附加类权重：出现次数多的权重大
+    :param labels 做成np.array()的标签数据
+    :param nc 默认使用coco数据集，共80个类别
+'''
+def labels_to_class_weights(labels, nc=80):
+    if labels[0] is None:
+        return torch.Tensor()
+
+    labels = np.concatenate(labels, 0)    # labels.shape = (866643, 5) for COCO
+    classes = labels[:, 0].astype(np.int)    # labels = [class xywh]
+    weights = np.bincount(classes, minlength=nc)    # 统计每种类别出现的次数
+
+    weights[weights == 0] = 1    # replace empty bins with 1
+    weights = 1 / weights    # number of targets per class
+    weights /= weights.sum()    # normalize
+    return torch.from_numpy(weights)

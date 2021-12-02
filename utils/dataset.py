@@ -5,6 +5,8 @@ import glob
 from pathlib import Path
 import numpy as np
 from threading import Thread
+from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader
 
 # 图片和视频支持如下格式：
 img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.dng']
@@ -49,7 +51,7 @@ class LoadStream:
 
         # 检查各图像的shape
         s = np.stack([letterbox(x, new_shape=self.img_size)[0].shape for x in self.imgs], 0)
-        self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
+        self.rect = np.unique(s, axis=0).shape[0] == 1  # 所有图像大小均相等，则进行矩形推理
         if not self.rect:
             print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
 
@@ -198,6 +200,62 @@ def letterbox(img, new_shape=(416, 416), color=(114, 114, 114), auto=True, scale
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)    # 上下左右用相同颜色填充
     return img, ratio, (dh, dw)
+
+
+'''
+    加载训练图像及标签
+'''
+class LoadImageAndLabels(Dataset):
+    def __init__(self, img_path, img_size, batch_size, hyp=None, single_cls=False):
+        # 图像和标签文件列表都要写全路径
+        f = glob.iglob(img_path + os.sep + '*.*')
+        self.img_filelist = [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats]    # 图像
+        self.label_filelist = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt') for x in self.img_filelist]    # 标签
+
+        self.n = len(self.img_filelist)
+        self.batch_index = np.floor(np.arange(self.n) / batch_size).astype(np.int)
+        self.img_size = img_size
+        self.hyp = hyp
+
+        # cache label
+        self.imgs = [None] * self.n
+        self.labels = [np.zeros((0, 5), dtype=np.float32)] * self.n
+        nm, nf, ne, nd = 0, 0, 0, 0    # number missing, found, empty, duplicate
+
+        # 从标签文件做标签矩阵，做成np.array()格式
+        pbar = tqdm(self.label_filelist)
+        for i, label_file in enumerate(pbar):
+            try:
+                with open(label_file, 'r') as f:
+                    np_label = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+            except:
+                nm += 1    # 标签文件缺失数量+1
+                continue
+
+            if np_label.shape[0]:
+                # 依次检查格式，是否做标准化
+                assert np_label.shape[1] == 5, '> 5 label columns: %s' % label_file
+                assert (np_label >= 0).all(), 'negative labels: %s' % label_file
+                assert (np_label[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % label_file
+                if np.unique(np_label, axis=0).shape[0] < np_label.shape[0]:  # 检查有没有同一内容多行的情况
+                    nd += 1    # 重复数据量+1
+                if single_cls:
+                    np_label[:, 0] = 0    # 单类别时，强制类别编号为0
+                self.labels[i] = np_label
+                nf += 1    # 已找到的文件数+1
+            else:
+                ne += 1    # 空文件个数+1
+        # 打印标签文件读取情况
+        pbar.set_description("Read labels %s (%g found, %g missing, %g empty, %g duplicate, for %g images)" % (str(Path(self.label_files[0]).parent),
+                                                                                                               nf, nm, ne, nd, self.n))
+
+    def __len__(self):
+        return len(self.img_filelist)
+
+
+
+
+
 
 if __name__ == '__main__':
     img = np.ndarray([100, 150, 3])
